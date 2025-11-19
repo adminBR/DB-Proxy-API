@@ -16,9 +16,9 @@ app.add_middleware(
 app.include_router(query_runner.router, prefix="/api/v1")
 
 
-@app.get("/test")
-def test():
-    return "Test successful"
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 if __name__ == "__main__":
