@@ -1,5 +1,4 @@
-from sqlalchemy import create_engine, text
-from urllib.parse import quote
+from sqlalchemy import create_engine
 from config import ORACLE_DB_PARAMS_PROD, ORACLE_DB_PARAMS_TEST, POSTGRES_DB_PARAMS
 
 
@@ -26,3 +25,12 @@ def get_postgres_connection():
     except Exception as e:
         print(e)
         raise Exception(e)
+
+
+def get_connection(database: str, env="prod"):
+    if database.lower() == "oracle":
+        return get_oracle_connection(env)
+    elif database.lower() == "postgres":
+        return get_postgres_connection()
+    else:
+        raise ValueError("Unsupported database type")
