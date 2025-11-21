@@ -1,43 +1,59 @@
 from sqlalchemy import create_engine
 from config import ORACLE_DB_PARAMS_PROD, ORACLE_DB_PARAMS_TEST, POSTGRES_DB_PARAMS
+from sqlalchemy.ext.asyncio import create_async_engine
 
 
 def get_oracle_connection(env="prod"):
-    try:
-        ORACLE_DB_PARAMS = (
-            ORACLE_DB_PARAMS_PROD if env == "prod" else ORACLE_DB_PARAMS_TEST
-        )
-        engine = create_engine(
-            f'oracle+cx_oracle://{ORACLE_DB_PARAMS["user"]}:{ORACLE_DB_PARAMS["password"]}@{ORACLE_DB_PARAMS["dsn"]}'
-        )
-        return engine
-    except Exception as e:
-        print(e)
-        raise Exception(e)
+    params = ORACLE_DB_PARAMS_PROD if env == "prod" else ORACLE_DB_PARAMS_TEST
+    conn_str = (
+        f"oracle+cx_oracle://{params['user']}:{params['password']}@{params['dsn']}"
+    )
+    return create_engine(conn_str)
+
+
+async def get_oracle_connection_async(env="prod"):
+    params = ORACLE_DB_PARAMS_PROD if env == "prod" else ORACLE_DB_PARAMS_TEST
+    conn_str = (
+        f"oracle+asyncoracledb://{params['user']}:{params['password']}@{params['dsn']}"
+    )
+    return create_async_engine(conn_str)
 
 
 def get_postgres_connection(database_name: str):
-    try:
-        engine = create_engine(
-            f'postgresql+psycopg2://{POSTGRES_DB_PARAMS["user"]}:{POSTGRES_DB_PARAMS["password"]}@{POSTGRES_DB_PARAMS["host"]}:{POSTGRES_DB_PARAMS["port"]}/{database_name}'
-        )
-        return engine
-    except Exception as e:
-        print(e)
-        raise Exception(e)
+    conn_str = (
+        f"postgresql+psycopg2://{POSTGRES_DB_PARAMS['user']}:"
+        f"{POSTGRES_DB_PARAMS['password']}@"
+        f"{POSTGRES_DB_PARAMS['host']}:"
+        f"{POSTGRES_DB_PARAMS['port']}/{database_name}"
+    )
+    return create_engine(conn_str)
+
+
+async def get_postgres_connection_async(database_name: str):
+    conn_str = (
+        f"postgresql+asyncpg://{POSTGRES_DB_PARAMS['user']}:"
+        f"{POSTGRES_DB_PARAMS['password']}@"
+        f"{POSTGRES_DB_PARAMS['host']}:"
+        f"{POSTGRES_DB_PARAMS['port']}/{database_name}"
+    )
+    return create_async_engine(conn_str)
 
 
 def get_connection(database: str, database_name: str, env="prod"):
     if database.lower() == "oracle":
         return get_oracle_connection(env)
-    elif database.lower() == "postgres":
+    if database.lower() == "postgres":
         return get_postgres_connection(database_name)
-    else:
-        raise ValueError(
-            f"Unsupported database type '{database}', please use one of the active databases: {get_active_databases()}"
-        )
+    raise ValueError(
+        f"Unsupported database type '{database}', please use one of the active databases: 'oracle' or 'postgres'"
+    )
 
 
-# placeholder for future organization of active databases
-def get_active_databases():
-    return {"oracle": "Oracle DB Connection", "postgres": "Postgres DB Connection"}
+async def get_connection_async(database: str, database_name: str, env="prod"):
+    if database.lower() == "oracle":
+        return await get_oracle_connection_async(env)
+    if database.lower() == "postgres":
+        return await get_postgres_connection_async(database_name)
+    raise ValueError(
+        f"Unsupported database type '{database}', please use one of the active databases: 'oracle' or 'postgres'"
+    )
