@@ -2,6 +2,8 @@ fastapi
 pydantic
 uvicorn
 SQLAlchemy
-cx_Oracle
+oracledb
 psycopg2-binary
-asyncpg
+redis
+aioredis
+asyncio
