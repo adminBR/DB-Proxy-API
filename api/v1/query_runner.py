@@ -15,18 +15,14 @@ r = get_redis_client()
 
 
 class QueryRequest(BaseModel):
-    """
-    Represents a query request.
-
-    database: The type or engine of the database (e.g., 'postgres', 'mysql').
-    database_name: The specific database/schema name to connect to.
-    """
 
     query: str
     database: str
     database_name: str
     cache: Optional[bool] = False
     cache_duration_seconds: Optional[int] = Field(300, ge=10, le=3600)
+    fallback_to_tasy: Optional[bool] = False
+    fallback_query: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
@@ -111,8 +107,8 @@ def run_query_basic(request: QueryRequest):
                 time_taken=0.0, headers=cached_data["headers"], data=cached_data["data"]
             )
 
+    start_time = time()
     try:
-        start_time = time()
         with engine.connect() as connection:
             result = connection.execute(text(request.query))
             rows = [dict(row) for row in result.mappings().all()]
@@ -132,4 +128,24 @@ def run_query_basic(request: QueryRequest):
             response = QueryResponse(time_taken=time_taken, headers=headers, data=rows)
             return response
     except Exception as e:
+        if (
+            request.database != "oracle"
+            and request.fallback_to_tasy
+            and request.fallback_query
+        ):
+            try:
+                fallback_engine = get_db_engine("oracle", request.database_name)
+                with fallback_engine.connect() as connection:
+                    result = connection.execute(text(request.fallback_query))
+                    rows = [dict(row) for row in result.mappings().all()]
+                    headers = list(rows[0].keys()) if rows else []
+                    time_taken = time() - start_time
+                    return QueryResponse(
+                        time_taken=time_taken, headers=headers, data=rows
+                    )
+            except Exception as fallback_e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Query execution failed: {e}. Fallback failed: {fallback_e}",
+                )
         raise HTTPException(status_code=500, detail=f"Query execution failed: {e}")
