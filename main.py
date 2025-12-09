@@ -3,7 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from api.v1 import query_runner
 
-app = FastAPI()
+app = FastAPI(
+    title="Samur DB Proxy API",
+    version="1.0.0",
+    description="API for safe query execution.",
+)
 
 app.add_middleware(
     CORSMiddleware,

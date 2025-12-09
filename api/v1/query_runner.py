@@ -4,7 +4,7 @@ from util.db_connectors import get_db_engine, get_redis_client
 from sqlalchemy import text
 import asyncio
 from time import time
-from typing import Optional
+from typing import Optional, Literal
 import json
 from pydantic import BaseModel, Field
 
@@ -15,20 +15,32 @@ r = get_redis_client()
 
 
 class QueryRequest(BaseModel):
-
-    query: str
-    database: str
-    database_name: str
-    cache: Optional[bool] = False
-    cache_duration_seconds: Optional[int] = Field(300, ge=10, le=3600)
-    fallback_to_tasy: Optional[bool] = False
-    fallback_query: Optional[str] = None
+    query: str = Field(
+        ..., description="The SQL query to execute against the selected database."
+    )
+    database: str = Field(
+        ..., description="The database type to use, such as 'oracle' or 'postgres'."
+    )
+    database_name: str = Field(
+        ..., description="The target database name (unused for Oracle)."
+    )
+    cache_duration_seconds: Optional[int] = Field(
+        None,
+        ge=10,
+        le=3600,
+        description="Optional cache duration in seconds for Redis (between 10 and 3600).",
+    )
 
 
 class QueryResponse(BaseModel):
-    time_taken: float
-    headers: list[str]
-    data: list[dict]
+    cached: bool = Field(
+        ..., description="Indicates whether the response was served from cache."
+    )
+    time_taken: float = Field(
+        ..., description="Time in seconds that the execution took."
+    )
+    headers: list[str] = Field(..., description="Column headers returned by the query.")
+    data: list[dict] = Field(..., description="Rows returned by the executed query.")
 
 
 async def run_blocking_query(engine, query):
@@ -49,14 +61,18 @@ async def run_query_async(request: QueryRequest):
             status_code=400, detail=f"Failed to acquire connection: {e}"
         )
 
-    if request.cache:
+    if request.cache_duration_seconds:
         cached_result = r.get(request.query)
         if cached_result and type(cached_result) == bytes:
             cached_data = json.loads(cached_result)
             return QueryResponse(
-                time_taken=0.0, headers=cached_data["headers"], data=cached_data["data"]
+                cached=True,
+                time_taken=0.0,
+                headers=cached_data["headers"],
+                data=cached_data["data"],
             )
 
+    # Continuing with query execution without cache
     try:
 
         def execute_query():
@@ -72,7 +88,7 @@ async def run_query_async(request: QueryRequest):
         rows, headers = await loop.run_in_executor(None, execute_query)
         time_taken = time() - start_time
 
-        if request.cache:
+        if request.cache_duration_seconds:
             r.set(
                 request.query,
                 json.dumps(
@@ -82,13 +98,18 @@ async def run_query_async(request: QueryRequest):
                 ex=request.cache_duration_seconds,
             )
 
-        return QueryResponse(time_taken=time_taken, headers=headers, data=rows)
+        return QueryResponse(
+            cached=False, time_taken=time_taken, headers=headers, data=rows
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Query execution failed: {e}")
 
 
 @router.post("/run_query", response_model=QueryResponse)
 def run_query_basic(request: QueryRequest):
+    """
+    Execute a SQL query against the specified database.
+    """
     if request.query.strip() == "":
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
@@ -99,23 +120,26 @@ def run_query_basic(request: QueryRequest):
             status_code=400, detail=f"Failed to acquire connection: {e}"
         )
 
-    if request.cache:
+    if request.cache_duration_seconds:
         cached_result = r.get(request.query)
         if cached_result and type(cached_result) == bytes:
             cached_data = json.loads(cached_result)
             return QueryResponse(
-                time_taken=0.0, headers=cached_data["headers"], data=cached_data["data"]
+                cached=True,
+                time_taken=0.0,
+                headers=cached_data["headers"],
+                data=cached_data["data"],
             )
-
-    start_time = time()
+    # continuing with query execution without cache
     try:
+        start_time = time()
         with engine.connect() as connection:
             result = connection.execute(text(request.query))
             rows = [dict(row) for row in result.mappings().all()]
             headers = list(rows[0].keys()) if rows else []
             time_taken = time() - start_time
 
-            if request.cache:
+            if request.cache_duration_seconds:
                 r.set(
                     request.query,
                     json.dumps(
@@ -125,27 +149,9 @@ def run_query_basic(request: QueryRequest):
                     ex=request.cache_duration_seconds,
                 )
 
-            response = QueryResponse(time_taken=time_taken, headers=headers, data=rows)
+            response = QueryResponse(
+                cached=False, time_taken=time_taken, headers=headers, data=rows
+            )
             return response
     except Exception as e:
-        if (
-            request.database != "oracle"
-            and request.fallback_to_tasy
-            and request.fallback_query
-        ):
-            try:
-                fallback_engine = get_db_engine("oracle", request.database_name)
-                with fallback_engine.connect() as connection:
-                    result = connection.execute(text(request.fallback_query))
-                    rows = [dict(row) for row in result.mappings().all()]
-                    headers = list(rows[0].keys()) if rows else []
-                    time_taken = time() - start_time
-                    return QueryResponse(
-                        time_taken=time_taken, headers=headers, data=rows
-                    )
-            except Exception as fallback_e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Query execution failed: {e}. Fallback failed: {fallback_e}",
-                )
         raise HTTPException(status_code=500, detail=f"Query execution failed: {e}")
